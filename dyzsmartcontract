@@ -1,0 +1,276 @@
+{-# STDLIB_VERSION 3 #-}
+{-# SCRIPT_TYPE ACCOUNT #-}
+{-# CONTENT_TYPE DAPP #-}
+
+let upVote = "upvote"
+
+let adminAddress1 = base58'3P2XCb2HwmaEG1zBunzjNq6XNQWmm5Me2sJ' # Dyzrupt Admin 1
+let adminAddress2 = base58'3NAqtCScgFynCuRLUoXm2BHTdu8suatCe7b' # Henry
+let adminAddress3 = base58'3Mucpi1K4FMVrZKnYEgjxQf5DkkBX7QrHoJ' # Dzyrupt
+
+let dyzId = base58'dACACFaoLaRMNGocg5aas4Md9aFP8jdAbLJvF5rqqrV'
+
+func getStakePoolKey() = "stake_pool"
+
+func getStakePool () = match getInteger(this, getStakePoolKey()) {
+  case a: Int => a
+  case _ => 0
+}
+
+func getVoteAmountKey(id: String, type: String) = {
+    if (type == "upvote") then id + "_" + type + "_amount"
+    else throw("Invalid vote type")
+}
+
+func getStakerKey (staker: String) = (staker + "_stake")
+
+func getCurrentStake (staker: String) = match getInteger(this, getStakerKey(staker)) {
+  case a: Int => a
+  case _ => 0
+}
+
+func getProfileKey(id: String) = {
+    id + "_entrepreneurProfile"
+}
+
+func getStatusKey(id: String) = {
+    id + "_status"
+}
+
+func getVoteKey(id: String, type: String) = {
+    if (type == "upvote") then id + "_upvote"
+    else throw("Invalid vote type")
+}
+
+
+func profileExist(id: String) = {
+    match getString(this, getProfileKey(id)) {
+        case a: String => true
+        case _ => false
+
+    }
+}
+
+func getVoteStatus(voteId: String) = {
+    match getString(this, getStatusKey(voteId)) {
+    case a: String => a
+    case _ => false
+  }
+}
+
+func getVoterAmountKey(id: String, voteId: String) = {
+    id + "_" + voteId + "_amount" 
+}
+
+
+func getVoteAmountCount(voteId: String, vote: String) = {
+    match getInteger(this, getVoteAmountKey(voteId, vote)) {
+        case a: Int => a
+        case  _ => 0
+    }
+}
+
+func getLastClaimHeight(pubKey: String) = {
+    match getInteger(this, "last_claim_" + pubKey) {
+    case a: Int => a
+    case _ => 0
+  }
+}
+
+func getVoteCount(voteId: String, vote: String) = {
+    match getInteger(this, getVoteKey(voteId, vote)) {
+        case a: Int => a
+        case _ => throw("Not a valid vote ID")
+    }
+}
+
+func getVoterKey(address: String, voteId: String) = {
+    address + "_" + voteId + "_" + "vote"
+}
+
+func getVoter(address: String, voteId: String) = {
+    match getString(this, getVoterKey(address, voteId)) {
+        case a: String => a
+        case _ => ""
+    }
+}
+
+func canVote(address: String, voteId: String) = {
+    let voter = getVoter(address, voteId)
+    if (voter == "") then true
+    else false
+}
+
+func getClaimedTotal() = {
+    match getInteger(this, "claimed_total") {
+        case a: Int => a
+        case _ => 0
+    }
+}
+
+func getClaimedByStaker(address: String) = {
+    match getInteger(this, "claimed_total_" + address) {
+        case a: Int => a
+        case _ => 0
+    }
+}
+
+@Callable(i)
+func addEntrepreneurProfile(name: String, avatar: String, bio: String, gender: String, location: String) = {
+    if (i.caller.bytes == adminAddress1 || i.caller.bytes == adminAddress2 || i.caller.bytes == adminAddress3 ) then {
+    
+    let transactionId = toBase58String(i.transactionId)
+    WriteSet([
+    DataEntry(getProfileKey(transactionId), name + "_" + avatar + "_" + bio + "_" + gender + "_" + location), 
+    DataEntry(getVoteKey(transactionId, "upvote"), 0),
+    DataEntry(getVoteAmountKey(transactionId, "upvote"), 0),
+    DataEntry(getStatusKey(transactionId), "open")])
+    }
+    else throw("Only Dyzrupt Admin can call this dApp function")
+}
+
+@Callable(i)
+func vote(voteId: String, vote: String) = {
+    let pmt = extract(i.payment)
+      let voter = toBase58String(i.caller.bytes)
+    if(pmt.amount == 0) then throw("You cannot vote without paying voting fee")
+    else if (pmt.assetId != dyzId) then throw("You can only vote with DYZRUPT token")
+    else
+    if (canVote(toBase58String(i.caller.bytes), voteId)) then
+    if(profileExist(voteId)) then {
+        if (getVoteStatus(voteId) == "open") then {
+          if (vote == upVote) then {
+            let voteCount = getVoteCount(voteId, vote)
+            let voteAmountCount = getVoteAmountCount(voteId, vote)
+            let newVoteCount = voteCount + 1
+            let newVoteAmountCount = voteAmountCount + pmt.amount
+            ScriptResult(
+                WriteSet([
+                DataEntry(getVoteKey(voteId, vote), newVoteCount),
+                DataEntry(getVoterKey(voter, voteId), voteId),
+                DataEntry(getVoterAmountKey(voter, voteId), pmt.amount),
+                DataEntry(getVoteAmountKey(voteId, vote), newVoteAmountCount)
+            ]),
+            TransferSet([ScriptTransfer(this, pmt.amount, dyzId )])
+            )
+
+        } else throw("Not a valid vote value")
+    } else throw("This profile is not open for voting")
+    } else throw("Invalid Profile")
+    else
+    throw("You can't vote twice")
+}
+
+@Callable(i)
+func openVote(voteId: String) = {
+    if (i.caller.bytes == adminAddress1 || i.caller.bytes == adminAddress2 || i.caller.bytes == adminAddress3) then {
+         if (profileExist(voteId)) then {
+            WriteSet([
+            DataEntry(getStatusKey(voteId), "open")
+            ])
+        } else throw("Invalid ID")
+    }
+       
+    else throw("Only Dyzrupt Admin can call this dApp function")
+   
+}
+
+@Callable(i)
+func closeVote(voteId: String) = {
+    if (i.caller.bytes == adminAddress1 || i.caller.bytes == adminAddress2 || i.caller.bytes == adminAddress3) then {
+         if (profileExist(voteId)) then {
+            WriteSet([
+            DataEntry(getStatusKey(voteId), "closed")
+            ])
+        } else throw("Invalid ID")
+    }    
+    else throw("Only Dyzrupt Admin can call this dApp function")
+    
+}
+
+
+@Callable(i)
+func withdraw(voteId: String) = {
+    let voter = toBase58String(i.caller.bytes)
+    if (getVoter(voter, voteId) != "") then
+        if (getVoteStatus(voteId) == "closed") then
+            let currentKey = getVoterAmountKey(voter, voteId) 
+            let currentAmount = match getInteger(this, currentKey) {
+                case a:Int => a
+                case _ => throw("You didn't vote for this entrepreneur")
+            }
+            if (currentAmount == 0) then throw("Seems you have previously withdrawn.")
+            else 
+                ScriptResult(
+                    WriteSet([DataEntry(currentKey, 0)]), 
+                    TransferSet([ScriptTransfer(i.caller, currentAmount, dyzId)])
+                )
+        else throw("Can't withdraw vote amount while voting is still open.")
+    else  throw("You didn't vote for this entrepreneur")
+
+    }
+
+@Callable(i)
+func stake() = {
+    let staker = toBase58String(i.caller.bytes)
+    let pmt = extract(i.payment)
+
+    if (pmt.amount == 0) then throw("Stake amount too low")
+    else if (pmt.assetId != dyzId) then throw("You can only stake with DYZRUPT token")
+    else {
+      let currentStake = getCurrentStake(staker)
+      #let stakePercent = (10 / 100)
+      let stakeableAmount = fraction(pmt.amount, 5, 100) #(pmt.amount * stakePercent)
+      let amountToStake = (pmt.amount - stakeableAmount)
+      let newStakedAmount = (currentStake + amountToStake)
+      let stakePool = getStakePool()
+      let newStakePool = (stakePool + stakeableAmount)
+
+      ScriptResult(WriteSet([DataEntry(getStakerKey(staker), newStakedAmount), DataEntry(getStakePoolKey(), newStakePool)]), TransferSet([]))
+    }
+}
+
+@Callable(i)
+func unstake(amount: Int) = {
+  let staker = toBase58String(i.caller.bytes)
+  let currentStake = getCurrentStake(staker)
+
+  if (currentStake == 0) then throw("You don't have any stakes")
+  else if (amount > currentStake) then throw("You can't withdraw an amount higher than you staked")
+  else {
+    #let unstakePercent = (20 / 100)
+    let unstakeableAmount = fraction(amount, 10, 100) #(amount * unstakePercent)
+    let amountToUnstake = (amount - unstakeableAmount)
+    let newUnstakedAmount = (currentStake - amount)
+    let stakePool = getStakePool()
+    let newStakePool = (stakePool + unstakeableAmount)
+
+    ScriptResult(WriteSet([DataEntry(getStakerKey(staker), newUnstakedAmount), DataEntry(getStakePoolKey(), newStakePool)]), TransferSet([ScriptTransfer(i.caller, amountToUnstake, dyzId)]))
+  }
+}
+
+@Callable(i)
+func claimDailyStakeReward(reward:Int) = {
+  let staker = toBase58String(i.caller.bytes)
+  let currentStake = getCurrentStake(staker)
+  let stakePool = getStakePool()
+  let currentHeight = height
+  let lastClaimHeight = getLastClaimHeight(staker)
+  let claimedTotalSoFar = getClaimedTotal()
+  let claimedByStaker = getClaimedByStaker(staker)
+  
+  if (currentStake == 0) then throw("You don't have any stakes")
+  else if (stakePool == 0) then throw("Nothing in Stake pool at this time. Try again later")
+  else if ((reward > stakePool)) then throw("No rewards at this time")
+  else if (currentHeight < lastClaimHeight + 1440) then throw("You can only claim once a day")
+  else {
+    let newStakePool = (stakePool - reward)
+    let newStakeAmount = (currentStake)
+
+    ScriptResult(WriteSet([DataEntry("claimed_total_" + staker, claimedByStaker + reward), DataEntry("claimed_total", claimedTotalSoFar + reward), DataEntry("last_claim_" + staker, currentHeight), DataEntry(getStakerKey(staker), newStakeAmount), DataEntry(getStakePoolKey(), newStakePool)]), TransferSet([ScriptTransfer(i.caller, reward, dyzId)]))
+  }
+}
+
+
+# @Verifier(tx)
+# func standardVerifier() = sigVerify(tx.bodyBytes, tx.proofs[0], tx.senderPublicKey)
